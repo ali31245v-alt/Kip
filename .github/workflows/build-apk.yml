@@ -1,0 +1,80 @@
+name: Build Kip APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'pubspec.yaml'
+      - 'lib/**'
+      - 'android/**'
+      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Check Flutter project files
+        run: |
+          if [ ! -f pubspec.yaml ] || [ ! -f lib/main.dart ]; then
+            echo "::error::Kip source files are not uploaded yet. Add pubspec.yaml and lib/main.dart, then run this workflow again."
+            exit 1
+          fi
+
+      - name: Generate missing Android scaffold
+        run: |
+          if [ ! -f android/gradlew ]; then
+            flutter create --platforms=android --org com.abdo --project-name kip_app .
+          fi
+
+      - name: Configure application ID
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/build.gradle')
+          if not p.exists():
+              p = Path('android/app/build.gradle.kts')
+          if p.exists():
+              s = p.read_text()
+              if p.suffix == '.kts':
+                  s = s.replace('namespace = "com.abdo.kip_app"', 'namespace = "com.abdo.wellness"')
+                  s = s.replace('applicationId = "com.abdo.kip_app"', 'applicationId = "com.abdo.wellness"')
+              else:
+                  s = s.replace("namespace 'com.abdo.kip_app'", "namespace 'com.abdo.wellness'")
+                  s = s.replace('namespace "com.abdo.kip_app"', 'namespace "com.abdo.wellness"')
+                  s = s.replace("applicationId 'com.abdo.kip_app'", "applicationId 'com.abdo.wellness'")
+                  s = s.replace('applicationId "com.abdo.kip_app"', 'applicationId "com.abdo.wellness"')
+              p.write_text(s)
+          PY
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kip-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
